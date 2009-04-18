@@ -1,0 +1,30 @@
+usePlugin('scala')
+usePlugin('war')
+usePlugin('jetty')
+
+targetCompatibility = 1.5
+version = 1
+
+dependencies {
+    addMavenRepo()
+    addMavenStyleRepo('scala-releases', 'http://scala-tools.org/repo-releases/')
+
+    scalaTools 'org.scala-lang:scala-compiler:2.7.3',
+	'org.scala-lang:scala-library:2.7.3'
+
+    compile 'org.scala-lang:scala-library:2.7.3',
+    	'net.liftweb:lift-webkit:1.0',
+	'net.liftweb:lift-util:1.0'
+	
+    testCompile 'junit:junit:4.4',
+    	'org.scala-lang:scala-compiler:2.7.3',
+    	'org.mortbay.jetty:jetty:6.1.6'
+	
+    testCompile 'org.mortbay.jetty:jetty-util:6.1.6'
+	
+    providedCompile 'javax.servlet:servlet-api:2.5'
+}
+
+jettyRun.scanIntervalSeconds=5
+
+
