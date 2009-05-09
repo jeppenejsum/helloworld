@@ -1,0 +1,7 @@
+addMavenRepo()
+addMavenStyleRepo('java.net', 'https://maven-repository.dev.java.net/nonav/repository')
+addMavenStyleRepo('jets3t', 'http://jets3t.s3.amazonaws.com/maven2')
+
+addFlatDirResolver('lib', new File(rootDir, 'lib')) 
+dependencies('com.google.code.typica:typica:1.5', 'org.apache.ant:ant-jsch:1.7.1', 'jsch:jsch:0.1.29', 'net.java.dev.jets3t:jets3t:0.7.0',
+	'commons-httpclient:commons-httpclient:3.1', 'commons-logging:commons-logging:1.1')
