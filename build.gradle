@@ -1,3 +1,11 @@
+import java.net.SocketTimeoutException
+import java.lang.RuntimeException
+import java.net.InetSocketAddress
+import com.xerox.amazonws.ec2.*
+import org.jets3t.service.model.S3Object
+import org.jets3t.service.security.AWSCredentials
+import org.jets3t.service.impl.rest.httpclient.RestS3Service
+
 usePlugin('scala')
 usePlugin('war')
 usePlugin('jetty')
@@ -5,26 +13,138 @@ usePlugin('jetty')
 targetCompatibility = 1.5
 version = 1
 
+awsAccessKeyId=""
+awsSecretAccessKey=""
+ec2keyname = ""
+ec2KeyFile = "" 
+s3Bucket = ""
+	
+imageId = "ami-2c9f7845" // Rightscale Ubuntu 8.04 
+
+ec2 = new Jec2(awsAccessKeyId, awsSecretAccessKey);
+
 dependencies {
     addMavenRepo()
     addMavenStyleRepo('scala-releases', 'http://scala-tools.org/repo-releases/')
-
-    scalaTools 'org.scala-lang:scala-compiler:2.7.3',
-	'org.scala-lang:scala-library:2.7.3'
-
-    compile 'org.scala-lang:scala-library:2.7.3',
-    	'net.liftweb:lift-webkit:1.0',
-	'net.liftweb:lift-util:1.0'
-	
-    testCompile 'junit:junit:4.4',
-    	'org.scala-lang:scala-compiler:2.7.3',
-    	'org.mortbay.jetty:jetty:6.1.6'
+    scalaTools 'org.scala-lang:scala-compiler:2.7.3', 'org.scala-lang:scala-library:2.7.3'
+    compile 'org.scala-lang:scala-library:2.7.3', 'net.liftweb:lift-webkit:1.0', 'net.liftweb:lift-util:1.0'
+    testCompile 'junit:junit:4.4', 	'org.scala-lang:scala-compiler:2.7.3','org.mortbay.jetty:jetty:6.1.6'
 	
     testCompile 'org.mortbay.jetty:jetty-util:6.1.6'
 	
     providedCompile 'javax.servlet:servlet-api:2.5'
 }
 
-jettyRun.scanIntervalSeconds=5
+createTask('createInstance', dependsOn: 'libs') {
+	def config = new LaunchConfiguration(imageId)
+	config.keyName = ec2keyname
+	def instances = ec2.runInstances(config)
+	def instance = instances.instances.get(0)
+	createInstance.instanceId = instance.instanceId
+	//createInstance.instanceId = 'i-11057578'
+	println "Started instance with id $createInstance.instanceId"
+}
 
+def sshExec(cmd) {
+	ant.sshexec(host: createInstance.dnsName, trust: true, keyfile: ec2KeyFile, username:"root", command:cmd)
+}
 
+def waitFor(name, timeOutSecs, Closure c) {
+	while (timeOutSecs > 0) {
+		def val = c()
+		if (val)
+			break;	 
+		Thread.sleep(1000)			  
+		timeOutSecs--
+		println "Waiting for $name, $timeOutSecs seconds left until timeout"
+	}
+	
+	if (timeOutSecs == 0)
+		throw new RuntimeException("Timeout waiting for $name")
+}
+
+def bootstrap(cookbookURL, dnaURL) {
+	// Wait for SSH service to be ready on the instance
+	def id = createInstance.instanceId
+	def instance
+	
+	waitFor("instance to boot", 120, {
+		instances = ec2.describeInstances([id])
+		instance = instances.get(0).instances.get(0)
+		return instance.running
+	})
+	def hostname = instance.dnsName
+	createInstance.dnsName = hostname
+	println "Instance boot complete, hostname is $hostname"
+	waitFor("SSH service", 180, {
+		Socket socket = null;
+		try {
+			socket = new Socket();
+			socket.bind(null);
+			socket.connect(new InetSocketAddress(hostname, 22), 1000)
+			return true
+		} catch (SocketTimeoutException e) {
+			return false;
+		} finally {
+			socket.close()
+		}
+	})
+	
+	sshExec("gem install --no-ri --no-rdoc ohai chef --source http://gems.opscode.com --source http://gems.rubyforge.org");
+	ant.scp(passphrase:"", todir: "root@$createInstance.dnsName:", trust: true, keyfile: ec2KeyFile) {
+		fileset(dir: "deployment") {
+			include(name: "solo.rb")
+		}
+	}
+	sshExec("chef-solo -c solo.rb -j '$dnaURL' -l info -r '$cookbookURL'");
+}
+
+def uploadCookbooksToS3() {
+	// Make & upload cookbooks
+	ant.tar(destfile:"$buildDir/cookbooks.tgz", compression:"gzip", basedir: "deployment/", includes:"cookbooks/**/*", excludes:"cookbooks/.git/**")
+
+	def credentials = new AWSCredentials(awsAccessKeyId, awsSecretAccessKey)
+	s3 = new RestS3Service(credentials)
+   	bucket = s3.getBucket(s3Bucket)
+   	s3obj = new S3Object(bucket, new File(buildDir, "cookbooks.tgz"))
+   	s3.putObject(bucket,s3obj)
+   	expiry  = new GregorianCalendar()
+	expiry.add(Calendar.MINUTE,10)
+   	cookbookURL = s3.createSignedGetUrl(s3obj.bucketName, s3obj.key, credentials, expiry.time)
+
+   	s3obj = new S3Object(bucket,archive_war.getArchivePath())
+   	// Need to make war file public readable. Workaround until http://tickets.opscode.com/browse/CHEF-269 is fixed
+   	s3obj.acl = org.jets3t.service.acl.AccessControlList.REST_CANNED_PUBLIC_READ 
+   	
+   	s3.putObject(bucket,s3obj)
+	// warURL = s3.createSignedGetUrl(s3obj.bucketName, s3obj.key, credentials, expiry.time)
+   	warURL = "http://" + s3.generateS3HostnameForBucket(s3obj.bucketName) + "/" + s3obj.key
+	
+	// Make & upload the DNA file
+	dna = new File(buildDir, "dna.json")
+	dna.delete()
+	dna << '{"war": "' + warURL + '", "recipes": "helloworld"}'
+		
+   	s3obj = new S3Object(bucket,dna)
+   	s3.putObject(bucket,s3obj)
+	dnaURL = s3.createSignedGetUrl(s3obj.bucketName, s3obj.key, credentials, expiry.time)
+   		
+   	return [cookbookURL, dnaURL]
+}
+
+createTask('testDeploy', dependsOn:['libs','createInstance']) {
+	urls = uploadCookbooksToS3()
+	bootstrap(urls[0], urls[1])
+}
+
+// Very simple integration test :-)
+createTask('integrationTest', dependsOn: 'testDeploy') {
+      client = new org.apache.commons.httpclient.HttpClient()
+      method = new org.apache.commons.httpclient.methods.GetMethod("http://$createInstance.dnsName/")
+      client.executeMethod(method)
+      def s = method.responseBodyAsString
+      if (s.indexOf("Welcome to the final helloworld project!") < 0) {
+    	println s
+      	throw new RuntimeException("Test failed")
+      }
+ } 
