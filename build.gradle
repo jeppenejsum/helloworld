@@ -140,12 +140,16 @@ createTask('testDeploy', dependsOn:['libs','createInstance']) {
 
 // Very simple integration test :-)
 createTask('integrationTest', dependsOn: 'testDeploy') {
-      client = new org.apache.commons.httpclient.HttpClient()
-      method = new org.apache.commons.httpclient.methods.GetMethod("http://$createInstance.dnsName/")
-      client.executeMethod(method)
-      def s = method.responseBodyAsString
-      if (s.indexOf("Welcome to the final helloworld project!") < 0) {
-    	println s
-      	throw new RuntimeException("Test failed")
-      }
+	try {
+		client = new org.apache.commons.httpclient.HttpClient()
+		method = new org.apache.commons.httpclient.methods.GetMethod("http://$createInstance.dnsName/")
+		client.executeMethod(method)
+		def s = method.responseBodyAsString
+		if (s.indexOf("Welcome to the final helloworld project!") < 0) {
+			println s
+			throw new RuntimeException("Test failed")
+		}	
+	} finally {
+		ec2.terminateInstances([createInstance.instanceId])
+	}
  } 

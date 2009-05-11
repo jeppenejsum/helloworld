@@ -1,0 +1,25 @@
+This is the source for the article series "EC2 Continuous Deployment: Hello world" located at
+
+http://jeppenejsum.wordpress.com/2009/05/03/ec2-continuous-deployment-hello-world/
+
+
+The files contain a complete end-to-end example for doing continuous deployment:
+
+ - Building a Lift webapp with Gradle (Need Gradle with the Scala plugin)
+ - Launch new EC2 instance
+ - Configure & Deploy EC2 instance using Chef
+ - Run simple integration test
+ - Shutdown EC2 instance
+
+You need to enter your Amazon AWS credentials in the top of build.gradle in order to try the examples.
+
+If this is done, you can type
+
+gradle integrationTest
+
+to build, deploy and test the webapp.
+
+
+Feel free to comment. Enjoy!
+
+/Jeppe Nejsum Madsen
