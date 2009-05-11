@@ -15,10 +15,10 @@ version = 1
 
 awsAccessKeyId=""
 awsSecretAccessKey=""
-ec2keyname = ""
-ec2KeyFile = "" 
-s3Bucket = ""
-	
+ec2keyname = "" // Name of the EC2 key used to start instance
+ec2KeyFile = "" // Path to EC2 key file 
+s3Bucket = "" // The S3 bucket to use for uploading cookbooks & war file
+
 imageId = "ami-2c9f7845" // Rightscale Ubuntu 8.04 
 
 ec2 = new Jec2(awsAccessKeyId, awsSecretAccessKey);
@@ -41,7 +41,6 @@ createTask('createInstance', dependsOn: 'libs') {
 	def instances = ec2.runInstances(config)
 	def instance = instances.instances.get(0)
 	createInstance.instanceId = instance.instanceId
-	//createInstance.instanceId = 'i-11057578'
 	println "Started instance with id $createInstance.instanceId"
 }
 
@@ -84,6 +83,8 @@ def bootstrap(cookbookURL, dnaURL) {
 			socket.connect(new InetSocketAddress(hostname, 22), 1000)
 			return true
 		} catch (SocketTimeoutException e) {
+			return false;
+		} catch (java.net.ConnectException e) {
 			return false;
 		} finally {
 			socket.close()
